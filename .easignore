@@ -1,0 +1,36 @@
+# Dependencies and Expo caches
+node_modules/
+.expo/
+dist/
+web-build/
+.cache/
+
+# Generated native directories
+ios/
+android/
+.kotlin/
+
+# Local state, logs, and tooling artifacts
+.git/
+.manus-logs/
+.webdev/
+logs/
+*.log
+coverage/
+tests/
+
+# Local environment and editor files
+.env*.local
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Archives and non-runtime project artifacts
+*.tgz
+*.tar.gz
+*.zip
+.project-config.json

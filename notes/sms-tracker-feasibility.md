@@ -1,0 +1,7 @@
+# Bank SMS Tracker Feasibility Notes
+
+- Google Play categorizes SMS permissions, including `READ_SMS`, as high-risk or sensitive. An app may use them only for critical core functionality under an allowed use or exception, and must submit an accurate Permissions Declaration Form; otherwise, the permission must be removed from the manifest. Source: https://support.google.com/googleplay/android-developer/answer/10208820?hl=en
+- Expo supports adding Android manifest permissions through `android.permissions`, but native permissions require a development or release build rather than Expo Go. Source: https://docs.expo.dev/guides/permissions/
+- Therefore, OMNI LIFE must not silently request or ship broad SMS access. Any native SMS bridge must be Android-only, opt-in, local-only, and gated behind a clear consent flow. A Play-distributed release also requires separate policy eligibility review before `READ_SMS` is included.
+- Android classifies both SMS contents and transaction/purchase information as data categories requiring accurate Data safety disclosure. Source: https://developer.android.com/privacy-and-security/declare-data-use
+- The reviewed `react-native-get-sms-android` bridge is Android-only. Its documented inbox listing method requires `android.permission.READ_SMS`; message deletion and sending require separate permissions and will not be used by OMNI LIFE. Source: https://github.com/briankabiro/react-native-get-sms-android

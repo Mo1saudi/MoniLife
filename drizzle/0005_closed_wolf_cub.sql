@@ -1,0 +1,2 @@
+ALTER TABLE `subscription_requests` MODIFY COLUMN `plan` enum('pro','pro_monthly','pro_annual','lifetime') NOT NULL;--> statement-breakpoint
+ALTER TABLE `manual_profiles` ADD `isCompedFree` boolean DEFAULT false NOT NULL;

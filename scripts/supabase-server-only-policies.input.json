@@ -1,0 +1,5 @@
+{
+  "project_id": "yefgrnuhutlosxeyoaia",
+  "name": "add_explicit_legacy_server_only_policies",
+  "query": "DO $$ DECLARE legacy_table text; BEGIN FOREACH legacy_table IN ARRAY ARRAY['profiles', 'tasks', 'habits', 'habit_completions', 'transactions', 'budgets', 'contacts', 'interactions', 'library_items', 'reminders', 'backups', 'announcements', 'admin_settings', 'notification_log', 'users', 'feature_usage', 'support_tickets'] LOOP EXECUTE format('DROP POLICY IF EXISTS omni_server_only ON public.%I', legacy_table); EXECUTE format('CREATE POLICY omni_server_only ON public.%I FOR ALL TO service_role USING (true) WITH CHECK (true)', legacy_table); END LOOP; END $$;"
+}

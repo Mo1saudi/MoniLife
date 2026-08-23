@@ -1,0 +1,1 @@
+ALTER TABLE `notification_campaigns` ADD `destinationUrl` varchar(1024);

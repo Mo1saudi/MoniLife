@@ -1,0 +1,137 @@
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useState } from "react";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+
+import { AdminAdvertisingPanel, type InAppAdvertisement } from "@/components/admin-advertising-panel";
+import { AdminSupportLinksPanel } from "@/components/admin-support-links-panel";
+import { getApiBaseUrl } from "@/constants/oauth";
+import { trpc } from "@/lib/trpc";
+
+const colors = { canvas: "#07111F", card: "#101F33", cyan: "#38D8FF", emerald: "#4FE1A8", ink: "#F2F7FC", muted: "#91A4B9", border: "#1C3B56", coral: "#FF7A76", amber: "#FFC36B", purple: "#B59CFF" };
+
+export type AdminRecentAddition = { id: string; type: "task" | "habit" | "idea" | "expense"; title: string; detail?: string; amountEgp?: number; category?: string; createdAt?: string };
+
+type Props = { isArabic: boolean; onToast: (message: string) => void; recentItems: AdminRecentAddition[]; onQuickEdit: (item: AdminRecentAddition) => void };
+
+export function AdminDashboardView({ isArabic, onToast, recentItems, onQuickEdit }: Props) {
+  const [editingItem, setEditingItem] = useState<AdminRecentAddition | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [editingDetail, setEditingDetail] = useState("");
+  const [editingAmount, setEditingAmount] = useState("");
+  const [editingCategory, setEditingCategory] = useState("");
+  const metrics = trpc.admin.dashboard.metrics.useQuery();
+  const feedback = trpc.admin.dashboard.feedback.useQuery();
+  const links = trpc.admin.dashboard.supportLinks.useQuery();
+  const subscriptions = trpc.admin.dashboard.subscriptions.useQuery();
+  const campaigns = trpc.admin.campaigns.list.useQuery();
+  const ads = trpc.admin.advertisements.list.useQuery();
+  const status = trpc.admin.dashboard.setFeedbackStatus.useMutation({ onSuccess: () => { void feedback.refetch(); } });
+  const addLink = trpc.admin.dashboard.addSupportLink.useMutation();
+  const updateLink = trpc.admin.dashboard.updateSupportLink.useMutation();
+  const deleteLink = trpc.admin.dashboard.deleteSupportLink.useMutation();
+  const review = trpc.admin.dashboard.reviewSubscription.useMutation({ onSuccess: () => { void subscriptions.refetch(); void metrics.refetch(); } });
+  const createAd = trpc.admin.advertisements.create.useMutation({ onSuccess: () => { void ads.refetch(); } });
+  const setAdActive = trpc.admin.advertisements.setActive.useMutation({ onSuccess: () => { void ads.refetch(); } });
+  const t = (ar: string, en: string) => isArabic ? ar : en;
+  const linkedCampaigns = (campaigns.data ?? []).filter((campaign) => Boolean(campaign.destinationUrl));
+  const busy = status.isPending || addLink.isPending || updateLink.isPending || deleteLink.isPending || review.isPending || createAd.isPending || setAdActive.isPending;
+  const refreshAll = async () => {
+    await Promise.all([metrics.refetch(), feedback.refetch(), links.refetch(), subscriptions.refetch(), campaigns.refetch(), ads.refetch()]);
+    onToast(t("تم تحديث بيانات تحكم التطبيق.", "App-control data refreshed."));
+  };
+  const updateFeedback = async (id: number, next: "read" | "resolved") => { try { await status.mutateAsync({ id, status: next }); onToast(t("تم تحديث حالة الرسالة.", "Feedback status updated.")); } catch { onToast(t("تعذر تحديث الرسالة.", "Could not update feedback.")); } };
+  const submitLink = async (input: { label: string; url: string; type: "support" | "faq" }) => {
+    if (addLink.isPending) return false;
+    try {
+      const saved = await addLink.mutateAsync(input);
+      const refreshed = await links.refetch();
+      if (!(refreshed.data ?? []).some((link) => link.id === saved.id && link.active)) throw new Error(t("تمت العملية لكن لم يتأكد ظهور الرابط بعد. حدّث القائمة وحاول مرة أخرى.", "The save did not appear in the refreshed list. Please retry."));
+      onToast(t(`تم حفظ رابط ${input.type === "support" ? "الدعم" : "الأسئلة"} وظهر للمستخدمين.`, `${input.type === "support" ? "Support" : "FAQ"} link saved and visible to users.`));
+      return true;
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : t("تعذر حفظ الرابط الآن.", "The link could not be saved now.");
+      onToast(message);
+      return false;
+    }
+  };
+  const updateSupportLink = async (input: { id: number; label: string; url: string; type: "support" | "faq" }) => {
+    if (updateLink.isPending) return false;
+    try {
+      const saved = await updateLink.mutateAsync(input);
+      const refreshed = await links.refetch();
+      if (!(refreshed.data ?? []).some((link) => link.id === saved.id && link.label === saved.label && link.url === saved.url)) throw new Error(t("لم يتأكد ظهور التعديلات بعد. حدّث القائمة وحاول مرة أخرى.", "The updated link did not appear after refresh. Please retry."));
+      onToast(t("تم حفظ تعديلات الرابط وظهرت للمستخدمين.", "Link changes were saved and are visible to users."));
+      return true;
+    } catch (error) {
+      onToast(error instanceof Error && error.message ? error.message : t("تعذر تعديل الرابط الآن.", "The link could not be updated now."));
+      return false;
+    }
+  };
+  const removeSupportLink = async (id: number) => {
+    if (deleteLink.isPending) return false;
+    try {
+      await deleteLink.mutateAsync({ id });
+      const refreshed = await links.refetch();
+      if ((refreshed.data ?? []).some((link) => link.id === id)) throw new Error(t("لم يتأكد حذف الرابط بعد. حدّث القائمة وحاول مرة أخرى.", "The deleted link still appears after refresh. Please retry."));
+      onToast(t("تم حذف الرابط من صفحة الدعم.", "The link was removed from support."));
+      return true;
+    } catch (error) {
+      onToast(error instanceof Error && error.message ? error.message : t("تعذر حذف الرابط الآن.", "The link could not be deleted now."));
+      return false;
+    }
+  };
+  const reviewRequest = async (id: number, decision: "approved" | "rejected") => { try { await review.mutateAsync({ id, decision }); onToast(decision === "approved" ? t("تم اعتماد الاشتراك وإشعار المستخدم.", "Subscription approved and user notified.") : t("تم رفض الطلب.", "Request rejected.")); } catch { onToast(t("تعذر مراجعة الطلب.", "Could not review the request.")); } };
+  const createInAppAd = async (input: { title: string; body: string; ctaLabel: string; placement: InAppAdvertisement["placement"]; destinationUrl?: string }) => { try { await createAd.mutateAsync(input); onToast(t("تم نشر الإعلان لحسابات Free.", "In-app ad published for Free accounts.")); } catch { onToast(t("تعذر نشر الإعلان.", "Could not publish the ad.")); } };
+  const toggleAd = async (id: number, active: boolean) => { try { await setAdActive.mutateAsync({ id, active }); onToast(active ? t("تم تفعيل الإعلان.", "Advertisement activated.") : t("تم إيقاف الإعلان.", "Advertisement paused.")); } catch { onToast(t("تعذر تحديث الإعلان.", "Could not update the advertisement.")); } };
+  const beginQuickEdit = (item: AdminRecentAddition) => { setEditingItem(item); setEditingTitle(item.title); setEditingDetail(item.detail ?? ""); setEditingAmount(item.amountEgp?.toString() ?? ""); setEditingCategory(item.category ?? ""); };
+  const saveQuickEdit = () => {
+    if (!editingItem || editingTitle.trim().length < 2) { onToast(t("اكتب عنوانًا واضحًا من حرفين على الأقل.", "Enter a clear title of at least two characters.")); return; }
+    const amountEgp = editingItem.type === "expense" ? Number(editingAmount.replace(/,/g, "")) : undefined;
+    if (editingItem.type === "expense" && (!Number.isFinite(amountEgp) || amountEgp! <= 0)) { onToast(t("أدخل مبلغًا صحيحًا أكبر من صفر.", "Enter a valid amount greater than zero.")); return; }
+    onQuickEdit({ ...editingItem, title: editingTitle.trim(), detail: editingDetail.trim(), amountEgp, category: editingCategory.trim() || editingItem.category });
+    setEditingItem(null);
+    onToast(t("تم حفظ التعديل السريع.", "Quick edit saved."));
+  };
+  const card = (icon: keyof typeof MaterialIcons.glyphMap, value: number | string, labelText: string, tint = colors.cyan) => <View style={styles.metric}><MaterialIcons name={icon} size={17} color={tint} /><Text style={[styles.metricValue, { color: tint }]}>{value}</Text><Text style={styles.metricLabel}>{labelText}</Text></View>;
+
+  return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View style={styles.hero}><View style={styles.heroIcon}><MaterialIcons name="settings-suggest" size={23} color={colors.canvas} /></View><View style={{ flex: 1 }}><Text style={styles.title}>{t("مركز تحكم OMNI LIFE", "OMNI LIFE app control")}</Text><Text style={styles.subtitle}>{t("إدارة تشغيل التطبيق ومحتواه ومستخدموه من مكان واحد.", "Operate app content, users, and communications from one place.")}</Text></View><Pressable disabled={busy} onPress={() => { void refreshAll(); }} style={({ pressed }) => [styles.refresh, (pressed || busy) && styles.pressed]}><MaterialIcons name="refresh" size={17} color={colors.cyan} /></Pressable></View>
+
+    <View style={styles.metricGrid}>{card("people", metrics.data?.manualUsers ?? "—", t("حسابات يدوية", "Manual users"))}{card("mail", metrics.data?.oauthUsers ?? "—", t("حسابات OAuth", "OAuth users"), colors.emerald)}{card("forum", metrics.data?.pendingFeedback ?? "—", t("رسائل جديدة", "New feedback"), colors.amber)}{card("payments", metrics.data?.pendingSubscriptions ?? "—", t("طلبات دفع", "Payment requests"), colors.coral)}</View>
+
+    <Panel title={t("تشغيل سريع", "Operational overview")}><View style={styles.operationGrid}><Operation icon="campaign" value={campaigns.data?.length ?? 0} label={t("حملات إشعار", "Push campaigns")} color={colors.cyan} /><Operation icon="ads-click" value={ads.data?.filter((ad) => ad.active).length ?? 0} label={t("إعلانات نشطة", "Active ads")} color={colors.emerald} /><Operation icon="support-agent" value={links.data?.length ?? 0} label={t("روابط دعم", "Support links")} color={colors.purple} /><Operation icon="mark-email-unread" value={metrics.data?.pendingFeedback ?? 0} label={t("تحتاج متابعة", "Need attention")} color={colors.amber} /></View><Pressable disabled={busy} onPress={() => { void refreshAll(); }} style={({ pressed }) => [styles.refreshAll, (pressed || busy) && styles.pressed]}><MaterialIcons name="sync" size={16} color={colors.canvas} /><Text style={styles.refreshAllText}>{busy ? t("جارٍ التحديث…", "Refreshing…") : t("تحديث بيانات التحكم", "Refresh operational data")}</Text></Pressable></Panel>
+
+    <Panel title={t("الإضافات الحديثة", "Recent additions")}>
+      {editingItem ? <View style={recentStyles.editor}><Text style={recentStyles.editorTitle}>{t("تعديل سريع", "Quick edit")} · {recentLabel(editingItem.type, isArabic)}</Text><TextInput value={editingTitle} onChangeText={setEditingTitle} placeholder={t("العنوان", "Title")} placeholderTextColor={colors.muted} style={recentStyles.input} textAlign={isArabic ? "right" : "left"} />{editingItem.type === "expense" ? <><TextInput value={editingAmount} onChangeText={setEditingAmount} placeholder={t("المبلغ بالجنيه", "Amount in EGP")} placeholderTextColor={colors.muted} keyboardType="decimal-pad" style={recentStyles.input} textAlign={isArabic ? "right" : "left"} /><TextInput value={editingCategory} onChangeText={setEditingCategory} placeholder={t("التصنيف", "Category")} placeholderTextColor={colors.muted} style={recentStyles.input} textAlign={isArabic ? "right" : "left"} /></> : <TextInput value={editingDetail} onChangeText={setEditingDetail} placeholder={t("تفاصيل اختيارية", "Optional details")} placeholderTextColor={colors.muted} multiline style={[recentStyles.input, recentStyles.details]} textAlign={isArabic ? "right" : "left"} textAlignVertical="top" />}<View style={recentStyles.actions}><Pressable onPress={() => setEditingItem(null)} style={recentStyles.cancel}><Text style={recentStyles.cancelText}>{t("إلغاء", "Cancel")}</Text></Pressable><Pressable onPress={saveQuickEdit} style={recentStyles.save}><Text style={recentStyles.saveText}>{t("حفظ", "Save")}</Text></Pressable></View></View> : null}
+      {recentItems.length ? recentItems.slice(0, 8).map((item) => <View key={`${item.type}-${item.id}`} style={recentStyles.row}><View style={[recentStyles.typeIcon, { backgroundColor: recentTint(item.type) }]}><MaterialIcons name={recentIcon(item.type)} size={16} color={colors.ink} /></View><View style={{ flex: 1 }}><Text style={recentStyles.itemTitle}>{item.title}</Text><Text numberOfLines={1} style={recentStyles.itemMeta}>{item.type === "expense" ? `${item.amountEgp?.toLocaleString(isArabic ? "ar-EG" : "en-US")} ${t("ج.م", "EGP")} · ${item.category ?? ""}` : item.detail || recentLabel(item.type, isArabic)}</Text></View><Pressable onPress={() => beginQuickEdit(item)} style={recentStyles.edit}><MaterialIcons name="edit" size={15} color={colors.cyan} /><Text style={recentStyles.editText}>{t("تعديل", "Edit")}</Text></Pressable></View>) : <Text style={styles.empty}>{t("ستظهر هنا أحدث المهام والعادات والأفكار والمصروفات المضافة.", "The newest tasks, habits, ideas, and expenses will appear here.")}</Text>}
+    </Panel>
+
+    <Panel title={t("تفاعل روابط حملات الإشعارات", "Push campaign link engagement")}>{campaigns.isLoading ? <Text style={styles.empty}>{t("جارٍ تحميل إحصاءات الحملات…", "Loading campaign analytics…")}</Text> : linkedCampaigns.length ? linkedCampaigns.map((campaign) => { const rate = campaign.recipients > 0 ? Math.round((campaign.linkClicks / campaign.recipients) * 100) : 0; return <View key={campaign.id} style={styles.engagementCard}><View style={styles.engagementHead}><View style={{ flex: 1 }}><Text style={styles.requestTitle}>{campaign.title}</Text><Text numberOfLines={1} style={styles.meta}>{campaign.destinationUrl}</Text></View><View style={styles.engagementRate}><Text style={styles.engagementRateText}>{rate}%</Text><Text style={styles.engagementRateLabel}>{t("معدل النقر", "Click rate")}</Text></View></View><View style={styles.engagementGrid}><EngagementMetric icon="touch-app" value={campaign.linkClicks} label={t("نقرات فريدة", "Unique taps")} color={colors.cyan} /><EngagementMetric icon="send" value={campaign.recipients} label={t("تم الاستلام", "Delivered")} color={colors.emerald} /></View></View>; }) : <Text style={styles.empty}>{t("ستظهر إحصاءات النقر بعد إرسال حملة تحتوي على رابط.", "Link analytics appear after a campaign with a destination URL is sent.")}</Text>}</Panel>
+
+    <AdminAdvertisingPanel isArabic={isArabic} busy={busy} ads={(ads.data ?? []) as InAppAdvertisement[]} onCreate={(input) => { void createInAppAd(input); }} onSetActive={(id, active) => { void toggleAd(id, active); }} />
+
+    <Panel title={t("أكثر الميزات استخدامًا", "Most-used features")}>{metrics.data?.topFeatures?.length ? metrics.data.topFeatures.map((item) => <View key={item.feature} style={styles.listRow}><Text style={styles.count}>{item.total}</Text><Text style={styles.listText}>{item.feature}</Text></View>) : <Text style={styles.empty}>{t("ستظهر البيانات بعد استخدام الميزات.", "Usage data will appear after features are used.")}</Text>}</Panel>
+
+    <Panel title={t("طلبات الاشتراك", "Subscription requests")}>{subscriptions.data?.length ? subscriptions.data.map((request) => <View key={request.id} style={styles.request}><View style={styles.requestHead}><View style={{ flex: 1 }}><Text style={styles.requestTitle}>{request.userName} · {request.plan}</Text><Text style={styles.meta}>{request.amountEgp} EGP · {request.paymentMethod} · {request.senderPhone}</Text><Text style={styles.meta}>{request.status}</Text></View><Text style={[styles.status, request.status === "pending" ? { color: colors.amber } : request.status === "approved" ? { color: colors.emerald } : { color: colors.coral }]}>{request.status}</Text></View>{request.receiptUrl ? <Image source={{ uri: request.receiptUrl.startsWith("http") ? request.receiptUrl : `${getApiBaseUrl()}${request.receiptUrl}` }} style={styles.receipt} /> : null}{request.status === "pending" ? <View style={styles.actions}><Pressable onPress={() => { void reviewRequest(request.id, "rejected"); }} style={styles.reject}><Text style={styles.rejectText}>{t("رفض", "Reject")}</Text></Pressable><Pressable onPress={() => { void reviewRequest(request.id, "approved"); }} style={styles.approve}><Text style={styles.approveText}>{t("اعتماد", "Approve")}</Text></Pressable></View> : null}</View>) : <Text style={styles.empty}>{t("لا توجد طلبات اشتراك.", "No subscription requests.")}</Text>}</Panel>
+
+    <Panel title={t("الأسئلة والمقترحات", "Questions & suggestions")}>{feedback.data?.length ? feedback.data.map((item) => <View key={item.id} style={styles.feedback}><Text style={styles.requestTitle}>{item.userName} · {item.type}</Text><Text style={styles.message}>{item.message}</Text><View style={styles.actions}>{item.status !== "resolved" ? <Pressable onPress={() => { void updateFeedback(item.id, "resolved"); }} style={styles.resolve}><Text style={styles.resolveText}>{t("تم الحل", "Resolve")}</Text></Pressable> : null}{item.status === "new" ? <Pressable onPress={() => { void updateFeedback(item.id, "read"); }} style={styles.mark}><Text style={styles.markText}>{t("تمت القراءة", "Mark read")}</Text></Pressable> : null}</View></View>) : <Text style={styles.empty}>{t("لا توجد رسائل حتى الآن.", "No feedback yet.")}</Text>}</Panel>
+
+    <AdminSupportLinksPanel isArabic={isArabic} links={links.data ?? []} isSaving={addLink.isPending || updateLink.isPending} pendingLinkId={updateLink.isPending ? updateLink.variables?.id ?? null : deleteLink.isPending ? deleteLink.variables?.id ?? null : null} onAdd={submitLink} onUpdate={updateSupportLink} onDelete={removeSupportLink} />
+  </ScrollView>;
+}
+
+function Operation({ icon, value, label, color }: { icon: keyof typeof MaterialIcons.glyphMap; value: number; label: string; color: string }) { return <View style={styles.operation}><MaterialIcons name={icon} size={17} color={color} /><Text style={[styles.operationValue, { color }]}>{value}</Text><Text style={styles.operationLabel}>{label}</Text></View>; }
+function EngagementMetric({ icon, value, label, color }: { icon: keyof typeof MaterialIcons.glyphMap; value: number; label: string; color: string }) { return <View style={styles.engagementMetric}><MaterialIcons name={icon} size={16} color={color} /><Text style={[styles.engagementValue, { color }]}>{value}</Text><Text style={styles.engagementLabel}>{label}</Text></View>; }
+function Panel({ title, children }: { title: string; children: React.ReactNode }) { return <View style={styles.panel}><Text style={styles.panelTitle}>{title}</Text>{children}</View>; }
+
+function recentLabel(type: AdminRecentAddition["type"], isArabic: boolean) { const labels = isArabic ? { task: "مهمة", habit: "عادة", idea: "فكرة", expense: "مصروف" } : { task: "Task", habit: "Habit", idea: "Idea", expense: "Expense" }; return labels[type]; }
+function recentIcon(type: AdminRecentAddition["type"]): keyof typeof MaterialIcons.glyphMap { return type === "task" ? "task-alt" : type === "habit" ? "local-fire-department" : type === "idea" ? "lightbulb" : "receipt-long"; }
+function recentTint(type: AdminRecentAddition["type"]) { return type === "task" ? "rgba(56,216,255,0.18)" : type === "habit" ? "rgba(255,195,107,0.18)" : type === "idea" ? "rgba(181,156,255,0.18)" : "rgba(79,225,168,0.18)"; }
+
+const recentStyles = StyleSheet.create({
+  row: { minHeight: 57, flexDirection: "row", alignItems: "center", gap: 8, padding: 8, borderRadius: 11, backgroundColor: "rgba(255,255,255,0.035)" }, typeIcon: { width: 31, height: 31, borderRadius: 10, alignItems: "center", justifyContent: "center" }, itemTitle: { color: colors.ink, fontSize: 10, fontWeight: "900", textAlign: "right" }, itemMeta: { color: colors.muted, fontSize: 8, marginTop: 3, textAlign: "right" }, edit: { minHeight: 30, paddingHorizontal: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3, backgroundColor: "rgba(56,216,255,0.10)", borderWidth: 1, borderColor: "rgba(56,216,255,0.24)" }, editText: { color: colors.cyan, fontSize: 8, fontWeight: "900" }, editor: { gap: 7, padding: 10, borderRadius: 12, backgroundColor: "rgba(56,216,255,0.06)", borderWidth: 1, borderColor: "rgba(56,216,255,0.24)" }, editorTitle: { color: colors.cyan, fontSize: 10, fontWeight: "900", textAlign: "right" }, input: { minHeight: 38, paddingHorizontal: 9, color: colors.ink, fontSize: 10, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.canvas }, details: { minHeight: 62, paddingTop: 8 }, actions: { flexDirection: "row", justifyContent: "flex-end", gap: 7 }, cancel: { minHeight: 32, paddingHorizontal: 11, borderRadius: 8, justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" }, cancelText: { color: colors.muted, fontSize: 9, fontWeight: "900" }, save: { minHeight: 32, paddingHorizontal: 14, borderRadius: 8, justifyContent: "center", backgroundColor: colors.emerald }, saveText: { color: colors.canvas, fontSize: 9, fontWeight: "900" },
+});
+
+const styles = StyleSheet.create({
+  content: { padding: 16, paddingBottom: 110, gap: 12 }, hero: { flexDirection: "row", alignItems: "center", gap: 10, padding: 15, borderRadius: 18, borderWidth: 1, borderColor: "rgba(56,216,255,0.32)", backgroundColor: colors.card }, heroIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyan }, title: { color: colors.ink, fontSize: 18, fontWeight: "900", textAlign: "right" }, subtitle: { color: colors.muted, fontSize: 10, marginTop: 3, textAlign: "right" }, refresh: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(56,216,255,0.10)", borderWidth: 1, borderColor: "rgba(56,216,255,0.30)" }, metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, metric: { width: "48.5%", minHeight: 76, padding: 10, borderRadius: 14, backgroundColor: colors.card, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" }, metricValue: { fontSize: 18, fontWeight: "900", marginTop: 5 }, metricLabel: { color: colors.muted, fontSize: 9, marginTop: 3, textAlign: "right" }, panel: { gap: 9, padding: 13, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" }, panelTitle: { color: colors.ink, fontSize: 13, fontWeight: "900", textAlign: "right" }, operationGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, operation: { width: "48.5%", minHeight: 70, borderRadius: 12, padding: 9, backgroundColor: "rgba(255,255,255,0.035)", borderWidth: 1, borderColor: "rgba(255,255,255,0.055)" }, operationValue: { fontSize: 17, fontWeight: "900", marginTop: 4 }, operationLabel: { color: colors.muted, fontSize: 8, fontWeight: "800", marginTop: 2, textAlign: "right" }, refreshAll: { minHeight: 40, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.cyan }, refreshAllText: { color: colors.canvas, fontSize: 10, fontWeight: "900" }, engagementCard: { gap: 9, padding: 10, borderRadius: 12, backgroundColor: "rgba(56,216,255,0.055)", borderWidth: 1, borderColor: "rgba(56,216,255,0.19)" }, engagementHead: { flexDirection: "row", alignItems: "flex-start", gap: 8 }, engagementRate: { minWidth: 54, paddingVertical: 6, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", backgroundColor: "rgba(79,225,168,0.12)" }, engagementRateText: { color: colors.emerald, fontSize: 14, fontWeight: "900" }, engagementRateLabel: { color: colors.muted, fontSize: 7, marginTop: 2 }, engagementGrid: { flexDirection: "row", gap: 7 }, engagementMetric: { flex: 1, minHeight: 52, padding: 8, borderRadius: 9, backgroundColor: "rgba(7,17,31,0.55)", alignItems: "center", justifyContent: "center" }, engagementValue: { fontSize: 14, fontWeight: "900", marginTop: 3 }, engagementLabel: { color: colors.muted, fontSize: 8, fontWeight: "800", marginTop: 2, textAlign: "center" }, listRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 34, paddingHorizontal: 8, borderRadius: 9, backgroundColor: "rgba(255,255,255,0.035)" }, listText: { flex: 1, color: colors.ink, fontSize: 10, fontWeight: "800", textAlign: "right" }, count: { color: colors.cyan, fontSize: 11, fontWeight: "900" }, empty: { color: colors.muted, fontSize: 10, textAlign: "right" }, request: { gap: 8, padding: 10, borderRadius: 11, backgroundColor: "rgba(255,255,255,0.035)" }, requestHead: { flexDirection: "row", gap: 8 }, requestTitle: { color: colors.ink, fontSize: 11, fontWeight: "900", textAlign: "right" }, meta: { color: colors.muted, fontSize: 9, marginTop: 2, textAlign: "right" }, status: { fontSize: 9, fontWeight: "900" }, receipt: { height: 170, width: "100%", borderRadius: 9, backgroundColor: "#0A1727" }, actions: { flexDirection: "row", justifyContent: "flex-end", gap: 7 }, approve: { minHeight: 32, paddingHorizontal: 12, borderRadius: 9, justifyContent: "center", backgroundColor: colors.emerald }, approveText: { color: "#062C3A", fontSize: 10, fontWeight: "900" }, reject: { minHeight: 32, paddingHorizontal: 12, borderRadius: 9, justifyContent: "center", backgroundColor: "rgba(255,122,118,0.14)", borderWidth: 1, borderColor: "rgba(255,122,118,0.35)" }, rejectText: { color: colors.coral, fontSize: 10, fontWeight: "900" }, feedback: { gap: 6, padding: 10, borderRadius: 11, backgroundColor: "rgba(255,255,255,0.035)" }, message: { color: colors.muted, fontSize: 10, lineHeight: 15, textAlign: "right" }, resolve: { minHeight: 30, paddingHorizontal: 10, borderRadius: 8, justifyContent: "center", backgroundColor: "rgba(79,225,168,0.13)" }, resolveText: { color: colors.emerald, fontSize: 9, fontWeight: "900" }, mark: { minHeight: 30, paddingHorizontal: 10, borderRadius: 8, justifyContent: "center", backgroundColor: "rgba(56,216,255,0.13)" }, markText: { color: colors.cyan, fontSize: 9, fontWeight: "900" }, typeRow: { flexDirection: "row", gap: 7 }, type: { minHeight: 32, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, borderColor: colors.border, justifyContent: "center" }, typeActive: { backgroundColor: "rgba(56,216,255,0.14)", borderColor: "rgba(56,216,255,0.65)" }, typeText: { color: colors.ink, fontSize: 10, fontWeight: "800" }, input: { minHeight: 42, paddingHorizontal: 10, color: colors.ink, fontSize: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: "#0A1727" }, add: { minHeight: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, backgroundColor: colors.cyan }, addText: { color: colors.canvas, fontSize: 10, fontWeight: "900" }, pressed: { opacity: 0.7 },
+});
