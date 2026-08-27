@@ -230,7 +230,9 @@ export const appRouter = router({
         return await supabase.registerSupabaseManualProfile(input);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to create the account.";
-        throw new TRPCError({ code: message.includes("already exists") ? "CONFLICT" : "BAD_REQUEST", message });
+        const isConflict = /already exists|already registered|duplicate|email_exists/i.test(message);
+        const isInfrastructure = /supabase server credentials|unable to create the supabase account|unable to retrieve the supabase profile|database|connection|connect|timeout|fetch failed|network/i.test(message);
+        throw new TRPCError({ code: isConflict ? "CONFLICT" : isInfrastructure ? "INTERNAL_SERVER_ERROR" : "BAD_REQUEST", message });
       }
     }),
     login: publicProcedure.input(manualLoginSchema).mutation(async ({ input }) => {
