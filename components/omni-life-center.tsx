@@ -38,7 +38,6 @@ import { ManualAccessGate } from "@/components/manual-access-gate";
 import { NotificationControlPanel } from "@/components/notification-control-panel";
 import { OmniNotificationRoutingBridge } from "@/components/omni-notification-routing-bridge";
 import { promotionInboxStyles } from "@/components/promotion-inbox-styles";
-import { VoiceCaptureButton } from "@/components/voice-capture-button";
 import { SettingsView } from "@/components/settings-view";
 import { InformationPagesView } from "@/components/information-pages-view";
 import type { AdminBulkAction, AdminHabitAction, AdminTaskAction } from "@/components/settings-view";
@@ -393,7 +392,6 @@ export function OmniLifeCenter() {
   const aiFrictionMutation = trpc.aiAssistance.frictionSteps.useMutation();
   const aiRoutineCopyMutation = trpc.aiAssistance.notificationCopy.useMutation();
   const aiContextualAlertMutation = trpc.aiAssistance.contextualAlert.useMutation();
-  const voiceQuickCaptureMutation = trpc.voiceQuickCapture.process.useMutation();
   const weeklySnapshotMutation = trpc.weeklyRetrospective.syncSnapshot.useMutation();
   const weeklyReportQuery = trpc.weeklyRetrospective.latest.useQuery(undefined, { enabled: hasReadyIdentity && screen === "weeklyReport", staleTime: 60_000 });
   const weeklyScheduleMutation = trpc.weeklyRetrospective.enableFridaySchedule.useMutation();
@@ -1347,35 +1345,6 @@ export function OmniLifeCenter() {
     setToast(t("تم ضبط موعد المهمة بالتاريخ والوقت اللذين اخترتهما.", "The task is scheduled for your selected date and time."));
   };
 
-  const handleVoiceCapture = async (payload: { base64: string; mimeType: string }) => {
-    const result = await voiceQuickCaptureMutation.mutateAsync({ audioBase64: payload.base64, contentType: payload.mimeType as "audio/m4a" });
-    const id = `voice-${Date.now()}`;
-    if (result.intent.kind === "expense") {
-      const intent = result.intent as Extract<typeof result.intent, { kind: "expense" }>;
-      if (intent.amount <= 0) {
-        setToast(t("فهمت المصروف، لكن لم ألتقط مبلغًا واضحًا. أضفه يدويًا للتأكيد.", "The expense was understood, but no clear amount was detected. Add it manually to confirm."));
-        return;
-      }
-      if (!canAddDailyManualTransaction(subs, hasPlanningPremium, new Date())) {
-        showDailyTransactionLimitPaywall();
-        return;
-      }
-      setSubs((current) => [{ id, title: intent.title, amount: intent.amount, category: intent.category, wasteful: false, kind: "daily_expense", recordedAt: new Date().toISOString(), source: "manual", transactionDirection: "expense" }, ...current]);
-      awardXp("expense");
-      setToast(t("تم إضافة المصروف الصوتي بنجاح 💸", "Voice expense added successfully."));
-      return;
-    }
-    if (result.intent.kind === "task") {
-      const scheduledAt = "scheduledAt" in result.intent ? result.intent.scheduledAt : undefined;
-      setTasks((current) => [{ id, title: result.intent.title, detail: t("تمت إضافتها من إدخال صوتي سريع.", "Added from quick voice capture."), energy: "medium", priority: "medium", done: false, reschedules: 0, scheduledAt }, ...current]);
-      setToast(t("تمت إضافة المهمة الصوتية بنجاح ✅", "Voice task added successfully."));
-      return;
-    }
-    setIdeas((current) => [{ id, title: result.intent.title, detail: t("فكرة تم التقاطها صوتيًا.", "Idea captured by voice."), old: false, archived: false }, ...current]);
-    awardXp("idea");
-    setToast(t("تم حفظ الفكرة الصوتية بنجاح 💡", "Voice idea saved successfully."));
-  };
-
   const submitComposer = () => {
     const enteredTitle = draft.trim();
     if (!composer || (!enteredTitle && composer !== "expense")) {
@@ -1562,8 +1531,6 @@ export function OmniLifeCenter() {
             {!entitlementQuery.isLoading && !hasPlanningPremium && (screen === "dashboard" || screen === "tasks" || screen === "habits" || screen === "finance") ? <InAppAdSlot placement={screen === "dashboard" ? "home" : screen} isArabic={isArabic} /> : null}
           </View>
         </View>
-
-        {screen === "dashboard" ? <VoiceCaptureButton isArabic={isArabic} onCapture={handleVoiceCapture} /> : null}
 
         {screen !== "dashboard" ? <FixedBackControl isArabic={isArabic} showAboveTabs={screen !== "notifications"} label={t("رجوع", "Back")} onPress={() => setScreen("dashboard")} /> : null}
 

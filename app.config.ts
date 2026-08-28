@@ -44,7 +44,7 @@ const config: ExpoConfig = {
   slug: env.appSlug,
   owner: "mosaudifinal",
   // Keep the crash-fix APK ahead of the installed 1.0.9 / 10009 package.
-  version: "1.0.10",
+  version: "1.0.77",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -77,11 +77,11 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
     // Android compares this integer, not the display version. It must always increase for updates.
-    versionCode: 10010,
+    versionCode: 10077,
     googleServicesFile: "./google-services.json",
     // READ_SMS is Android-only and requested only after the user enables the opt-in bank-SMS tracker.
     // Play distribution requires the applicable SMS Permissions Declaration and Data safety disclosure.
-    permissions: ["POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM", "RECEIVE_BOOT_COMPLETED", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC", "READ_SMS", "RECORD_AUDIO", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "ACCESS_NOTIFICATION_POLICY"],
+    permissions: ["POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM", "RECEIVE_BOOT_COMPLETED", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC", "READ_SMS", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "ACCESS_NOTIFICATION_POLICY"],
     intentFilters: [
       {
         action: "VIEW",
@@ -130,10 +130,12 @@ const config: ExpoConfig = {
       },
     ],
     "./plugins/with-omni-notification-sounds",
+    "./plugins/with-remove-record-audio",
     [
       "expo-audio",
       {
-        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
+        microphonePermission: false,
+        recordAudioAndroid: false,
       },
     ],
     [
@@ -176,7 +178,7 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: true,
-    reactCompiler: true,
+    reactCompiler: false,
   },
 };
 

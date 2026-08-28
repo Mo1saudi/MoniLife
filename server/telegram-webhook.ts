@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { randomUUID } from "crypto";
 
 import { getTelegramWebhookSecret, handleTelegramUpdate } from "./supabase";
 
@@ -16,9 +17,10 @@ export function registerTelegramWebhookRoutes(app: Express) {
     try {
       await handleTelegramUpdate(req.body);
       res.sendStatus(200);
-    } catch (error) {
-      console.error("[Telegram] Failed to process webhook update", error);
-      res.sendStatus(500);
+    } catch {
+      const requestId = randomUUID();
+      console.error(`[Telegram] webhook processing failed request=${requestId}`);
+      res.status(500).json({ ok: false, code: "TELEGRAM_WEBHOOK_PROCESSING_FAILED", requestId });
     }
   });
 }

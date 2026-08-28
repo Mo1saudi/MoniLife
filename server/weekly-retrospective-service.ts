@@ -1,15 +1,17 @@
 import * as db from "./db";
 import { buildWeeklyReport, type WeeklySnapshot } from "../lib/weekly-analytics";
+import { formatPhoneNotification } from "../lib/phone-notification-style";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 
 async function sendWeeklyReportPush(email: string) {
   const devices = await db.listActiveNotificationDevicesForManualEmail(email);
   if (!devices.length) return 0;
+  const presentation = formatPhoneNotification("persona", { title: "تقريرك الأسبوعي جاهز", body: "اكتشف ملخص إنجازاتك وخطوتك التالية داخل OMNI LIFE." });
   await fetch(EXPO_PUSH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(devices.map((device) => ({ to: device.expoPushToken, title: "📊 تقريرك الأسبوعي جاهز", body: "اكتشف ملخص إنجازاتك وخطوتك التالية داخل OMNI LIFE.", sound: "sound_persona.wav", priority: "high", data: { screen: "weekly-report", type: "weekly-retrospective" } }))),
+    body: JSON.stringify(devices.map((device) => ({ to: device.expoPushToken, title: presentation.title, body: presentation.body, sound: "sound_persona.wav", priority: "high", channelId: "omni-life-high-priority", data: { screen: "weekly-report", type: "weekly-retrospective" } }))),
     signal: AbortSignal.timeout(25_000),
   });
   return devices.length;

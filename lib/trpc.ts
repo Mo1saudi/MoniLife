@@ -31,7 +31,7 @@ export function createTRPCClient() {
           const manualProfile = await loadManualProfile();
           return {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...(manualProfile?.manualAdminToken ? { "X-Omni-Manual-Token": manualProfile.manualAdminToken } : {}),
+            ...((manualProfile?.manualSessionToken ?? manualProfile?.manualAdminToken) ? { "X-Omni-Manual-Token": manualProfile.manualSessionToken ?? manualProfile.manualAdminToken } : {}),
           };
         },
         // Custom fetch to include credentials for cookie-based auth

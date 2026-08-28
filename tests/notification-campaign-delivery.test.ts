@@ -31,12 +31,13 @@ describe("remote notification campaign delivery", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ status: "ok", id: "ticket-1" }] }) }));
 
     await expect(dispatchNotificationCampaign(14)).resolves.toEqual({ accepted: 1, failed: 0, recipients: 1 });
-    expect(dbMock.listActiveNotificationDevices).toHaveBeenCalledWith("all_opted_in");
+    expect(dbMock.listActiveNotificationDevices).toHaveBeenCalledWith("all_opted_in", undefined);
     expect(dbMock.createNotificationCampaignDelivery).toHaveBeenCalledWith(expect.objectContaining({ campaignId: 14, deviceId: 7, expoTicketId: "ticket-1", status: "accepted" }));
     expect(dbMock.updateNotificationCampaign).toHaveBeenLastCalledWith(14, expect.objectContaining({ status: "sent" }));
     const request = vi.mocked(fetch).mock.calls[0]?.[1];
     const payload = JSON.parse(String(request?.body));
-    expect(payload).toEqual([expect.objectContaining({ priority: "high", channelId: "omni-life-high-priority", badge: 1, data: expect.objectContaining({ campaignId: 14, externalUrl: "https://omnilife.example.com/learn-more", linkClickToken: expect.any(String), target: { kind: "dashboard", id: "campaign-14" } }) })]);
+    expect(payload).toEqual([expect.objectContaining({ title: campaign.title, body: campaign.body, priority: "high", channelId: "omni-life-high-priority", badge: 1, data: expect.objectContaining({ campaignId: 14, category: "habit_tip", externalUrl: "https://omnilife.example.com/learn-more", linkClickToken: expect.any(String) }) })]);
+    expect(payload[0].data.target).toBeUndefined();
     expect(dbMock.createNotificationCampaignDelivery).toHaveBeenCalledWith(expect.objectContaining({ linkClickToken: payload[0].data.linkClickToken }));
   });
 
@@ -50,7 +51,7 @@ describe("remote notification campaign delivery", () => {
     expect(dbMock.createNotificationCampaignDelivery).toHaveBeenCalledWith(expect.objectContaining({ status: "invalid_token" }));
   });
 
-  it("sends promotions as badge-only phone banners without an application screen target", async () => {
+  it("sends promotions using the administrator title and body without an application screen target", async () => {
     dbMock.getNotificationCampaign.mockResolvedValue({ ...campaign, id: 16, category: "promotion" });
     dbMock.listActiveNotificationDevices.mockResolvedValue([{ id: 9, expoPushToken: "ExponentPushToken[promotion-device]" }]);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ status: "ok", id: "ticket-promotion" }] }) }));
@@ -58,7 +59,7 @@ describe("remote notification campaign delivery", () => {
     await dispatchNotificationCampaign(16);
     const request = vi.mocked(fetch).mock.calls[0]?.[1];
     const payload = JSON.parse(String(request?.body));
-    expect(payload[0]).toEqual(expect.objectContaining({ priority: "high", channelId: "omni-life-high-priority", data: expect.objectContaining({ category: "promotion", promotionBadgeOnly: true, promotionTitle: campaign.title, promotionBody: campaign.body }) }));
+    expect(payload[0]).toEqual(expect.objectContaining({ title: campaign.title, body: campaign.body, priority: "high", channelId: "omni-life-high-priority", data: expect.objectContaining({ category: "promotion" }) }));
     expect(payload[0].data.target).toBeUndefined();
   });
 });

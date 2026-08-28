@@ -11,6 +11,9 @@ export type ManualProfileSession = {
   phone: string;
   secondaryContact: string | null;
   telegramLinked?: boolean;
+  /** Signed server session used for authenticated manual-account API calls such as push registration. */
+  manualSessionToken?: string;
+  /** Legacy field kept so older installed builds continue sending their administrator token. */
   manualAdminToken?: string;
 };
 

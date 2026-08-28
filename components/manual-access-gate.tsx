@@ -4,25 +4,31 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { NativeDateTimePicker } from "@/components/native-date-time-picker";
 import type { ManualProfileSession } from "@/lib/manual-session";
+import { classifyManualRegistrationError } from "@/lib/manual-registration-error";
 import { ONBOARDING_TOUR, type OnboardingTourSlide } from "@/lib/onboarding-tour";
 import { trpc } from "@/lib/trpc";
+import { normalizeNumericInput, parseAgeInput } from "../shared/telegram-recovery-input";
 
 type Mode = "welcome" | "access" | "register" | "login" | "forgot" | "reset" | "linkTelegram";
 type Props = { welcomeSeen: boolean; onWelcomeSeen: () => void; onAuthenticated: (profile: ManualProfileSession) => void };
 
 const palette = { canvas: "#07111F", card: "#101F33", cyan: "#38D8FF", emerald: "#4FE1A8", ink: "#F2F7FC", muted: "#91A4B9", border: "#1C3B56", error: "#FF8F8B" };
 
-function toBirthDateValue(value: string) {
-  return value ? new Date(`${value}T12:00:00`) : null;
+function keepSupportedDigits(value: string, maxLength: number) {
+  return value.normalize("NFKC").replace(/[^0-9٠-٩۰-۹]/g, "").slice(0, maxLength);
 }
 
-function formatBirthDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function registrationErrorMessage(error: unknown) {
+  switch (classifyManualRegistrationError(error)) {
+    case "conflict": return "هذا البريد مسجّل بالفعل. استخدم تسجيل الدخول أو بريدًا آخر.";
+    case "ip_limit": return "لا يمكن إنشاء أكثر من حسابين من نفس الشبكة. تواصل مع الإدارة إذا كان هذا خطأ.";
+    case "migration": return "بيانات التسجيل على الخادم تحتاج تحديثًا. حاول لاحقًا أو تواصل مع الإدارة.";
+    case "server_update": return "الخادم الحالي يحتاج تحديثًا لقبول العمر بدل تاريخ الميلاد؛ البريد الذي أدخلته ليس سبب الخطأ.";
+    case "service": return "تعذر الاتصال بخدمة الحسابات الآن. تحقق من الإنترنت وحاول لاحقًا.";
+    case "validation": return "تحقق من الاسم والعمر والهاتف والبريد وكلمة السر.";
+    default: return "تعذر إنشاء الحساب الآن. حاول مرة أخرى لاحقًا.";
+  }
 }
 
 export function ManualAccessGate({ welcomeSeen, onWelcomeSeen, onAuthenticated }: Props) {
@@ -30,7 +36,7 @@ export function ManualAccessGate({ welcomeSeen, onWelcomeSeen, onAuthenticated }
   const [mode, setMode] = useState<Mode>(welcomeSeen ? "access" : "welcome");
   const [welcomeIndex, setWelcomeIndex] = useState(0);
   const [fullName, setFullName] = useState("");
-  const [birthDate, setBirthDate] = useState("");
+  const [age, setAge] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [secondaryContact, setSecondaryContact] = useState("");
@@ -51,11 +57,17 @@ export function ManualAccessGate({ welcomeSeen, onWelcomeSeen, onAuthenticated }
   const complete = (profile: ManualProfileSession) => { onWelcomeSeen(); onAuthenticated(profile); };
   const submitRegister = async () => {
     setError("");
+    const parsedAge = parseAgeInput(age);
+    const normalizedPin = normalizeNumericInput(pin);
+    const normalizedConfirmation = normalizeNumericInput(passwordConfirmation);
+    if (parsedAge === null) { setError("اكتب العمر بالأرقام من 13 إلى 120. نقبل 31 و٣١ و۳۱."); return; }
+    if (normalizedPin.length !== 6) { setError("كلمة السر يجب أن تتكون من 6 أرقام."); return; }
+    if (normalizedPin !== normalizedConfirmation) { setError("تأكيد كلمة السر لا يطابق كلمة السر."); return; }
     try {
-      const profile = await register.mutateAsync({ fullName, birthDate, email, phone, secondaryContact: secondaryContact || undefined, pin, passwordConfirmation });
+      const profile = await register.mutateAsync({ fullName, age: parsedAge, email, phone, secondaryContact: secondaryContact || undefined, pin: normalizedPin, passwordConfirmation: normalizedConfirmation });
       complete(profile);
     } catch (err) {
-      setError(err instanceof Error ? "تحقق من البيانات؛ قد يكون البريد مسجلًا مسبقًا." : "تعذر إنشاء الحساب الآن.");
+      setError(registrationErrorMessage(err));
     }
   };
   const submitLogin = async () => {
@@ -104,7 +116,7 @@ export function ManualAccessGate({ welcomeSeen, onWelcomeSeen, onAuthenticated }
       <Image source={require("@/assets/images/icon.png")} style={styles.logo} contentFit="contain" />
       {mode === "welcome" ? <Welcome slide={ONBOARDING_TOUR[welcomeIndex]} index={welcomeIndex} count={ONBOARDING_TOUR.length} onNext={() => welcomeIndex === ONBOARDING_TOUR.length - 1 ? enterAccess() : setWelcomeIndex((index) => index + 1)} onSkip={enterAccess} /> : null}
       {mode === "access" ? <View style={styles.accessCard}><Text style={styles.title}>جاهز لبدء يومك؟</Text><Text style={styles.copy}>أنشئ ملفك مرة واحدة ثم عد إليه بسهولة في كل مرة تفتح فيها OMNI LIFE.</Text><Primary label="إنشاء حساب جديد" icon="person-add-alt-1" onPress={() => setMode("register")} /><Secondary label="لدي حساب — تسجيل الدخول" onPress={() => setMode("login")} /><Secondary label="ربط حساب Telegram" onPress={() => setMode("linkTelegram")} /></View> : null}
-      {mode === "register" ? <View style={styles.formCard}><FormHeading title="إنشاء ملفك الشخصي" onBack={() => setMode("access")} /><FormInput label="الاسم الكامل" value={fullName} onChangeText={setFullName} autoCapitalize="words" /><NativeDateTimePicker label="تاريخ الميلاد" value={toBirthDateValue(birthDate)} mode="date" maximumDate={new Date()} placeholder="اختر تاريخ الميلاد" onChange={(date) => setBirthDate(formatBirthDate(date))} /><FormInput label="البريد الإلكتروني" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" placeholder="you@example.com" /><FormInput label="رقم الهاتف" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+20 100 000 0000" /><FormInput label="وسيلة تواصل أخرى — اختياري" value={secondaryContact} onChangeText={setSecondaryContact} placeholder="واتساب أو حساب تواصل" /><FormInput label="كلمة السر من 6 أرقام" value={pin} onChangeText={setPin} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" /><FormInput label="تأكيد كلمة السر" value={passwordConfirmation} onChangeText={setPasswordConfirmation} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" />{error ? <Text style={styles.error}>{error}</Text> : null}<Primary label={busy ? "جارٍ إنشاء الحساب…" : "إنشاء الحساب"} icon="arrow-back" onPress={submitRegister} disabled={busy} /></View> : null}
+      {mode === "register" ? <View style={styles.formCard}><FormHeading title="إنشاء ملفك الشخصي" onBack={() => setMode("access")} /><FormInput label="الاسم الكامل" value={fullName} onChangeText={setFullName} autoCapitalize="words" /><FormInput label="العمر" hint="من 13 إلى 120 — اكتب 31 أو ٣١" value={age} onChangeText={(value) => setAge(keepSupportedDigits(value, 3))} keyboardType="number-pad" maxLength={3} placeholder="31" /><FormInput label="البريد الإلكتروني" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" placeholder="you@example.com" /><FormInput label="رقم الهاتف" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+20 100 000 0000" /><FormInput label="وسيلة تواصل أخرى — اختياري" value={secondaryContact} onChangeText={setSecondaryContact} placeholder="واتساب أو حساب تواصل" /><FormInput label="كلمة السر من 6 أرقام" value={pin} onChangeText={(value) => setPin(keepSupportedDigits(value, 6))} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" /><FormInput label="تأكيد كلمة السر" value={passwordConfirmation} onChangeText={(value) => setPasswordConfirmation(keepSupportedDigits(value, 6))} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" />{error ? <Text style={styles.error}>{error}</Text> : null}<Primary label={busy ? "جارٍ إنشاء الحساب…" : "إنشاء الحساب"} icon="arrow-back" onPress={submitRegister} disabled={busy} /></View> : null}
       {mode === "login" ? <View style={styles.formCard}><FormHeading title="تسجيل الدخول" onBack={() => setMode("access")} /><FormInput label="البريد الإلكتروني" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" placeholder="you@example.com" /><FormInput label="كلمة السر من 6 أرقام" value={pin} onChangeText={setPin} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" />{error ? <Text style={styles.error}>{error}</Text> : null}<Primary label={busy ? "جارٍ الدخول…" : "تسجيل الدخول"} icon="login" onPress={submitLogin} disabled={busy} /><Secondary label="نسيت كلمة السر؟" onPress={() => { setError(""); setMode("forgot"); }} /><Secondary label="ربط حساب Telegram" onPress={() => { setError(""); setMode("linkTelegram"); }} /><Secondary label="إنشاء حساب جديد" onPress={() => setMode("register")} /></View> : null}
       {mode === "forgot" ? <View style={styles.formCard}><FormHeading title="استعادة كلمة السر" onBack={() => setMode("login")} /><Text style={styles.copy}>سنرسل رمزًا لمرة واحدة إلى Telegram المرتبط بحسابك. لن تظهر أي كلمة سر سابقة.</Text><FormInput label="البريد الإلكتروني" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" placeholder="you@example.com" />{error ? <Text style={styles.error}>{error}</Text> : null}<Primary label={busy ? "جارٍ إرسال الرمز…" : "أرسل رمز الاسترداد عبر Telegram"} icon="send" onPress={submitResetRequest} disabled={busy} /><Secondary label="العودة لتسجيل الدخول" onPress={() => setMode("login")} /></View> : null}
       {mode === "reset" ? <View style={styles.formCard}><FormHeading title="تعيين كلمة سر جديدة" onBack={() => setMode("forgot")} /><Text style={styles.copy}>أدخل الرمز الذي وصلك على Telegram، ثم اختر كلمة سر جديدة من 6 أرقام.</Text><FormInput label="البريد الإلكتروني" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" placeholder="you@example.com" /><FormInput label="رمز الاسترداد" value={recoveryCode} onChangeText={setRecoveryCode} keyboardType="number-pad" maxLength={6} placeholder="••••••" /><FormInput label="كلمة السر الجديدة" value={pin} onChangeText={setPin} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" /><FormInput label="تأكيد كلمة السر الجديدة" value={passwordConfirmation} onChangeText={setPasswordConfirmation} keyboardType="number-pad" secureTextEntry={!showPassword} onTogglePassword={() => setShowPassword((value) => !value)} passwordVisible={showPassword} maxLength={6} placeholder="••••••" />{error ? <Text style={styles.error}>{error}</Text> : null}<Primary label={busy ? "جارٍ التحديث…" : "تحديث كلمة السر"} icon="lock-reset" onPress={submitResetConfirmation} disabled={busy} /></View> : null}
