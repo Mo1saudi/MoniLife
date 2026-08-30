@@ -44,7 +44,7 @@ const config: ExpoConfig = {
   slug: env.appSlug,
   owner: "mosaudifinal",
   // Keep the crash-fix APK ahead of the installed 1.0.9 / 10009 package.
-  version: "1.0.77",
+  version: "1.0.78",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -77,7 +77,7 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
     // Android compares this integer, not the display version. It must always increase for updates.
-    versionCode: 10077,
+    versionCode: 10078,
     googleServicesFile: "./google-services.json",
     // READ_SMS is Android-only and requested only after the user enables the opt-in bank-SMS tracker.
     // Play distribution requires the applicable SMS Permissions Declaration and Data safety disclosure.
