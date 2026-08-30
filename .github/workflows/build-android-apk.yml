@@ -50,7 +50,37 @@ jobs:
           trap 'rm -f google-services.json' EXIT
           pnpm exec expo prebuild --platform android --clean --no-install
 
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_STORE_PASSWORD"
+          test -n "$ANDROID_KEY_PASSWORD"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/build.gradle')
+          text = path.read_text()
+          marker = "    signingConfigs {\n"
+          signing = "    signingConfigs {\n        release {\n            storeFile file('release.keystore')\n            storePassword System.getenv('ANDROID_STORE_PASSWORD')\n            keyAlias 'omnilife-release'\n            keyPassword System.getenv('ANDROID_KEY_PASSWORD')\n        }\n"
+          if marker not in text:
+              raise SystemExit('signingConfigs marker not found')
+          text = text.replace(marker, signing, 1)
+          old = "            signingConfig signingConfigs.debug\n            def enableShrinkResources"
+          new = "            signingConfig signingConfigs.release\n            def enableShrinkResources"
+          if old not in text:
+              raise SystemExit('release signing line not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Build release APK
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
           ./gradlew assembleRelease --no-daemon --max-workers=2
