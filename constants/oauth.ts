@@ -1,5 +1,6 @@
 import * as Linking from "expo-linking";
 import * as ReactNative from "react-native";
+import { resolveApiBaseUrl } from "@/lib/api-base-url";
 
 // Extract scheme from bundle ID (last segment timestamp, prefixed with "manus")
 // e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
@@ -25,28 +26,20 @@ export const OWNER_NAME = env.ownerName;
 export const API_BASE_URL = env.apiBaseUrl;
 
 /**
- * Get the API base URL, deriving from current hostname if not set.
- * Metro runs on 8081, API server runs on 3000.
- * URL pattern: https://PORT-sandboxid.region.domain
+ * Get the API base URL, using the production Manus host for native builds.
+ * Web preview keeps deriving its API host from the current 8081/3000 hostname pair.
  */
 export function getApiBaseUrl(): string {
-  // If API_BASE_URL is set, use it
-  if (API_BASE_URL) {
-    return API_BASE_URL.replace(/\/$/, "");
-  }
+  const browserOrigin =
+    ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location
+      ? { protocol: window.location.protocol, hostname: window.location.hostname }
+      : undefined;
 
-  // On web, derive from current hostname by replacing port 8081 with 3000
-  if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
-    const { protocol, hostname } = window.location;
-    // Pattern: 8081-sandboxid.region.domain -> 3000-sandboxid.region.domain
-    const apiHostname = hostname.replace(/^8081-/, "3000-");
-    if (apiHostname !== hostname) {
-      return `${protocol}//${apiHostname}`;
-    }
-  }
-
-  // Fallback to empty (will use relative URL)
-  return "";
+  return resolveApiBaseUrl({
+    apiBaseUrl: API_BASE_URL,
+    platform: ReactNative.Platform.OS,
+    browserOrigin,
+  });
 }
 
 export const SESSION_TOKEN_KEY = "app_session_token";
