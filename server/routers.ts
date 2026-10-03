@@ -78,7 +78,7 @@ async function migrateVerifiedLegacyManualProfile(email: string, pin: string) {
   if (!legacy || !matchesLegacyManualPassword(pin, legacy.pinSalt, legacy.pinHash)) return null;
   return supabase.registerSupabaseManualProfile({
     fullName: legacy.fullName,
-    birthDate: legacy.birthDate.toISOString().slice(0, 10),
+    birthDate: new Date(legacy.birthDate).toISOString().slice(0, 10),
     email: legacy.email,
     phone: legacy.phone,
     secondaryContact: legacy.secondaryContact ?? undefined,
@@ -225,6 +225,9 @@ export const appRouter = router({
     }),
   }),
   manualAuth: router({
+    // The public registration contract currently has no request-IP field and
+    // intentionally relies on Supabase Auth/profile validation. The optional
+    // IP-ledger helpers are reserved for future/admin flows and are non-blocking.
     register: publicProcedure.input(manualRegistrationSchema).mutation(async ({ input }) => {
       try {
         return await supabase.registerSupabaseManualProfile(input);
@@ -434,6 +437,24 @@ export const appRouter = router({
         const link = await db.deleteSupportLink(input.id);
         await db.createAdminAuditLog({ actorUserId, action: "delete_support_link", targetType: "support_link", targetId: String(link.id), details: link.type });
         return { success: true } as const;
+      }),
+      users: omniAdminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).optional() }).optional()).query(({ input }) => supabase.listManualProfilesForAdministrator(input?.limit ?? 250)),
+      deleteAccounts: omniAdminProcedure.input(z.object({ emails: z.array(z.string().trim().email().max(320)).min(1).max(50) })).mutation(async ({ ctx, input }) => {
+        const actorUserId = ctx.user?.id ?? ctx.manualUserId;
+        if (!actorUserId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Administrator identity is unavailable." });
+        const emails = [...new Set(input.emails.map((email) => email.toLowerCase()))];
+        const results: Array<{ email: string; deleted: boolean; error?: string }> = [];
+        for (const email of emails) {
+          try {
+            const deleted = await supabase.deleteSupabaseManualAccountByAdmin(email);
+            try { await db.deleteManualAccountData(email); } catch (cleanupError) { console.warn("[Admin] Optional legacy data cleanup deferred", cleanupError); }
+            await db.createAdminAuditLog({ actorUserId, action: "delete_manual_account", targetType: "user", targetId: email, details: "admin account deletion" });
+            results.push(deleted);
+          } catch (error) {
+            results.push({ email, deleted: false, error: error instanceof Error ? error.message : "Unable to delete account." });
+          }
+        }
+        return { requested: emails.length, deleted: results.filter((item) => item.deleted).length, results } as const;
       }),
       subscriptions: omniAdminProcedure.query(() => db.listSubscriptionRequests()),
       reviewSubscription: omniAdminProcedure.input(z.object({ id: z.number().int().positive(), decision: z.enum(["approved", "rejected"]), note: z.string().trim().max(500).optional() })).mutation(async ({ ctx, input }) => {

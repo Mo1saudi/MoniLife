@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AdminAdvertisingPanel, type InAppAdvertisement } from "@/components/admin-advertising-panel";
 import { AdminSupportLinksPanel } from "@/components/admin-support-links-panel";
@@ -20,6 +20,7 @@ export function AdminDashboardView({ isArabic, onToast, recentItems, onQuickEdit
   const [editingAmount, setEditingAmount] = useState("");
   const [editingCategory, setEditingCategory] = useState("");
   const metrics = trpc.admin.dashboard.metrics.useQuery();
+  const users = trpc.admin.dashboard.users.useQuery({ limit: 250 });
   const feedback = trpc.admin.dashboard.feedback.useQuery();
   const links = trpc.admin.dashboard.supportLinks.useQuery();
   const subscriptions = trpc.admin.dashboard.subscriptions.useQuery();
@@ -32,9 +33,16 @@ export function AdminDashboardView({ isArabic, onToast, recentItems, onQuickEdit
   const review = trpc.admin.dashboard.reviewSubscription.useMutation({ onSuccess: () => { void subscriptions.refetch(); void metrics.refetch(); } });
   const createAd = trpc.admin.advertisements.create.useMutation({ onSuccess: () => { void ads.refetch(); } });
   const setAdActive = trpc.admin.advertisements.setActive.useMutation({ onSuccess: () => { void ads.refetch(); } });
+  const deleteAccounts = trpc.admin.dashboard.deleteAccounts.useMutation({ onSuccess: async (result) => { setSelectedEmails([]); await users.refetch(); onToast(t(`تم حذف ${result.deleted} حسابًا.`, `${result.deleted} account(s) deleted.`)); } });
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
   const t = (ar: string, en: string) => isArabic ? ar : en;
   const linkedCampaigns = (campaigns.data ?? []).filter((campaign) => Boolean(campaign.destinationUrl));
-  const busy = status.isPending || addLink.isPending || updateLink.isPending || deleteLink.isPending || review.isPending || createAd.isPending || setAdActive.isPending;
+  const busy = status.isPending || addLink.isPending || updateLink.isPending || deleteLink.isPending || review.isPending || createAd.isPending || setAdActive.isPending || deleteAccounts.isPending;
+  const toggleAccount = (email: string) => setSelectedEmails((current) => current.includes(email) ? current.filter((item) => item !== email) : [...current, email]);
+  const confirmDeleteAccounts = () => {
+    if (!selectedEmails.length || deleteAccounts.isPending) return;
+    Alert.alert(t("تأكيد حذف الحسابات", "Confirm account deletion"), t(`سيتم حذف ${selectedEmails.length} حسابًا نهائيًا.`, `${selectedEmails.length} account(s) will be permanently deleted.`), [{ text: t("إلغاء", "Cancel"), style: "cancel" }, { text: t("حذف نهائي", "Delete permanently"), style: "destructive", onPress: () => { void deleteAccounts.mutateAsync({ emails: selectedEmails }).catch((error) => onToast(error instanceof Error ? error.message : t("تعذر حذف الحسابات.", "Could not delete accounts."))); } }]);
+  };
   const refreshAll = async () => {
     await Promise.all([metrics.refetch(), feedback.refetch(), links.refetch(), subscriptions.refetch(), campaigns.refetch(), ads.refetch()]);
     onToast(t("تم تحديث بيانات تحكم التطبيق.", "App-control data refreshed."));
@@ -99,6 +107,13 @@ export function AdminDashboardView({ isArabic, onToast, recentItems, onQuickEdit
 
     <View style={styles.metricGrid}>{card("people", metrics.data?.manualUsers ?? "—", t("حسابات يدوية", "Manual users"))}{card("mail", metrics.data?.oauthUsers ?? "—", t("حسابات OAuth", "OAuth users"), colors.emerald)}{card("forum", metrics.data?.pendingFeedback ?? "—", t("رسائل جديدة", "New feedback"), colors.amber)}{card("payments", metrics.data?.pendingSubscriptions ?? "—", t("طلبات دفع", "Payment requests"), colors.coral)}</View>
 
+    <Panel title={t("إدارة الحسابات", "Account management")}>
+      <View style={accountStyles.toolbar}><Text style={styles.empty}>{t(`${selectedEmails.length} محدد`, `${selectedEmails.length} selected`)}</Text><Pressable disabled={busy || !(users.data ?? []).length} onPress={() => setSelectedEmails(selectedEmails.length === (users.data ?? []).length ? [] : (users.data ?? []).map((user) => user.email))} style={accountStyles.selectAll}><Text style={accountStyles.selectAllText}>{selectedEmails.length === (users.data ?? []).length ? t("إلغاء تحديد الكل", "Clear all") : t("تحديد الكل", "Select all")}</Text></Pressable></View>
+      {users.isLoading ? <Text style={styles.empty}>{t("جارٍ تحميل الحسابات…", "Loading accounts…")}</Text> : (users.data ?? []).length ? (users.data ?? []).map((user) => { const selected = selectedEmails.includes(user.email); return <Pressable key={user.email} onPress={() => toggleAccount(user.email)} style={[accountStyles.row, selected && accountStyles.selected]}><View style={[accountStyles.check, selected && accountStyles.checked]}>{selected ? <MaterialIcons name="check" size={15} color={colors.canvas} /> : null}</View><View style={{ flex: 1 }}><Text style={accountStyles.name}>{user.fullName}</Text><Text style={accountStyles.email}>{user.email}</Text></View>{user.isCompedFree ? <Text style={accountStyles.badge}>{t("مجاني", "Free")}</Text> : null}</Pressable>; }) : <Text style={styles.empty}>{t("لا توجد حسابات يدوية قابلة للإدارة.", "No manual accounts are available.")}</Text>}
+      <Pressable disabled={busy || !selectedEmails.length} onPress={confirmDeleteAccounts} style={({ pressed }) => [accountStyles.deleteButton, (!selectedEmails.length || busy || pressed) && styles.pressed]}><MaterialIcons name="delete-forever" size={17} color={colors.ink} /><Text style={accountStyles.deleteText}>{deleteAccounts.isPending ? t("جارٍ الحذف…", "Deleting…") : t("حذف الحسابات المحددة", "Delete selected accounts")}</Text></Pressable>
+      {deleteAccounts.data?.results?.length ? <View style={accountStyles.results}>{deleteAccounts.data.results.map((result) => <Text key={result.email} style={[accountStyles.result, { color: result.deleted ? colors.emerald : colors.coral }]}>{result.deleted ? "✓" : "!"} {result.email} · {result.deleted ? t("تم الحذف", "Deleted") : result.error}</Text>)}</View> : null}
+    </Panel>
+
     <Panel title={t("تشغيل سريع", "Operational overview")}><View style={styles.operationGrid}><Operation icon="campaign" value={campaigns.data?.length ?? 0} label={t("حملات إشعار", "Push campaigns")} color={colors.cyan} /><Operation icon="ads-click" value={ads.data?.filter((ad) => ad.active).length ?? 0} label={t("إعلانات نشطة", "Active ads")} color={colors.emerald} /><Operation icon="support-agent" value={links.data?.length ?? 0} label={t("روابط دعم", "Support links")} color={colors.purple} /><Operation icon="mark-email-unread" value={metrics.data?.pendingFeedback ?? 0} label={t("تحتاج متابعة", "Need attention")} color={colors.amber} /></View><Pressable disabled={busy} onPress={() => { void refreshAll(); }} style={({ pressed }) => [styles.refreshAll, (pressed || busy) && styles.pressed]}><MaterialIcons name="sync" size={16} color={colors.canvas} /><Text style={styles.refreshAllText}>{busy ? t("جارٍ التحديث…", "Refreshing…") : t("تحديث بيانات التحكم", "Refresh operational data")}</Text></Pressable></Panel>
 
     <Panel title={t("الإضافات الحديثة", "Recent additions")}>
@@ -130,6 +145,10 @@ function recentTint(type: AdminRecentAddition["type"]) { return type === "task" 
 
 const recentStyles = StyleSheet.create({
   row: { minHeight: 57, flexDirection: "row", alignItems: "center", gap: 8, padding: 8, borderRadius: 11, backgroundColor: "rgba(255,255,255,0.035)" }, typeIcon: { width: 31, height: 31, borderRadius: 10, alignItems: "center", justifyContent: "center" }, itemTitle: { color: colors.ink, fontSize: 10, fontWeight: "900", textAlign: "right" }, itemMeta: { color: colors.muted, fontSize: 8, marginTop: 3, textAlign: "right" }, edit: { minHeight: 30, paddingHorizontal: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3, backgroundColor: "rgba(56,216,255,0.10)", borderWidth: 1, borderColor: "rgba(56,216,255,0.24)" }, editText: { color: colors.cyan, fontSize: 8, fontWeight: "900" }, editor: { gap: 7, padding: 10, borderRadius: 12, backgroundColor: "rgba(56,216,255,0.06)", borderWidth: 1, borderColor: "rgba(56,216,255,0.24)" }, editorTitle: { color: colors.cyan, fontSize: 10, fontWeight: "900", textAlign: "right" }, input: { minHeight: 38, paddingHorizontal: 9, color: colors.ink, fontSize: 10, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.canvas }, details: { minHeight: 62, paddingTop: 8 }, actions: { flexDirection: "row", justifyContent: "flex-end", gap: 7 }, cancel: { minHeight: 32, paddingHorizontal: 11, borderRadius: 8, justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" }, cancelText: { color: colors.muted, fontSize: 9, fontWeight: "900" }, save: { minHeight: 32, paddingHorizontal: 14, borderRadius: 8, justifyContent: "center", backgroundColor: colors.emerald }, saveText: { color: colors.canvas, fontSize: 9, fontWeight: "900" },
+  });
+
+const accountStyles = StyleSheet.create({
+  toolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, selectAll: { minHeight: 30, paddingHorizontal: 9, borderRadius: 8, justifyContent: "center", backgroundColor: "rgba(56,216,255,0.10)", borderWidth: 1, borderColor: "rgba(56,216,255,0.24)" }, selectAllText: { color: colors.cyan, fontSize: 9, fontWeight: "900" }, row: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: 9, padding: 9, borderRadius: 11, backgroundColor: "rgba(255,255,255,0.035)", borderWidth: 1, borderColor: "transparent" }, selected: { borderColor: "rgba(56,216,255,0.52)", backgroundColor: "rgba(56,216,255,0.09)" }, check: { width: 23, height: 23, borderRadius: 7, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.muted }, checked: { borderColor: colors.cyan, backgroundColor: colors.cyan }, name: { color: colors.ink, fontSize: 10, fontWeight: "900", textAlign: "right" }, email: { color: colors.muted, fontSize: 8, marginTop: 2, textAlign: "right" }, badge: { color: colors.emerald, fontSize: 8, fontWeight: "900" }, deleteButton: { minHeight: 40, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.coral }, deleteText: { color: colors.ink, fontSize: 10, fontWeight: "900" }, results: { gap: 4, padding: 8, borderRadius: 9, backgroundColor: "rgba(7,17,31,0.55)" }, result: { fontSize: 8, textAlign: "right" },
 });
 
 const styles = StyleSheet.create({

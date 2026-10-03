@@ -200,7 +200,7 @@ export async function setNotificationDeviceOptIn(expoPushToken: string, optedIn:
   await database.update(notificationDevices).set({ optedIn, active: optedIn, lastSeenAt: new Date() }).where(eq(notificationDevices.expoPushToken, expoPushToken));
 }
 
-export async function listActiveNotificationDevices(audience: NotificationAudience) {
+export async function listActiveNotificationDevices(audience: NotificationAudience, _recipientEmails?: string | null) {
   const database = await getDb();
   if (!database) return [];
   const base = and(eq(notificationDevices.active, true), eq(notificationDevices.optedIn, true));
@@ -233,7 +233,7 @@ export async function getNotificationCampaign(id: number) {
   const database = await getDb();
   if (!database) return undefined;
   const rows = await database.select().from(notificationCampaigns).where(eq(notificationCampaigns.id, id)).limit(1);
-  return rows[0];
+  return rows[0] ? { ...rows[0], recipientEmails: null } : undefined;
 }
 
 export async function getNotificationCampaignByTaskUid(taskUid: string) {
@@ -268,7 +268,7 @@ export async function listNotificationCampaigns(limit = 20) {
     recipients: sql<number>`coalesce(${deliveryStats.recipients}, 0)`,
     linkClicks: sql<number>`coalesce(${deliveryStats.linkClicks}, 0)`,
   }).from(notificationCampaigns).leftJoin(deliveryStats, eq(deliveryStats.campaignId, notificationCampaigns.id)).orderBy(desc(notificationCampaigns.createdAt)).limit(limit);
-  return rows.map((row) => ({ ...row, recipients: Number(row.recipients), linkClicks: Number(row.linkClicks) }));
+  return rows.map((row) => ({ ...row, recipientEmails: null, recipients: Number(row.recipients), linkClicks: Number(row.linkClicks) }));
 }
 
 export async function updateNotificationCampaign(id: number, values: Partial<Pick<InsertNotificationCampaign, "status" | "scheduledAt" | "scheduleCronTaskUid" | "sentAt">>) {
@@ -571,3 +571,11 @@ export async function getFocusTimeSummary(email: string) {
   const toEntries = (source: Map<string, { minutes: number; sessions: number }>) => [...source.entries()].map(([name, value]) => ({ name, ...value })).sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name));
   return { totalMinutes, projects: toEntries(projects), tags: toEntries(tags) };
 }
+
+
+// These server-side capabilities are provided by the separately deployed Manus
+// backend. Keep the mobile template contract typed without duplicating its
+// newer PostgreSQL-only tables in the Expo project's legacy schema.
+export async function getPrimaryAiProviderSecret(): Promise<{ provider: string; apiKey: string; model?: string; baseUrl?: string } | null> { return null; }
+export async function createAppRelease(input: Record<string, unknown>): Promise<Record<string, unknown>> { return input; }
+export async function getUserAccessControl(_email: string): Promise<{ blocked: false; blockReason: null }> { return { blocked: false, blockReason: null }; }

@@ -343,6 +343,40 @@ export async function registerSupabaseManualProfile(input: ManualRegistrationInp
 
 export async function loginSupabaseManualProfile(emailInput: string, pin: string) {
   const email = normalizeEmail(emailInput);
+  const configuredAdminPassword = process.env.OMNI_ADMIN_PASSWORD;
+  if (email === OMNI_ADMIN_EMAIL && configuredAdminPassword && normalizeNumericInput(pin) === normalizeNumericInput(configuredAdminPassword)) {
+    // The administrator must remain able to enter the control center even when
+    // Supabase Auth is temporarily unreachable. The signed admin token is still
+    // generated with the server-only JWT secret and is never exposed as a PIN.
+    try {
+      await ensureOmniAdminAccount();
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pin });
+      if (!error && data.user) {
+        const profile = await findProfileByAuthUserId(data.user.id);
+        if (profile) {
+          return {
+            ...toPublicProfile(profile),
+            manualSessionToken: createManualSessionToken(email),
+            manualAdminToken: createManualAdminSessionToken(email),
+          };
+        }
+      }
+    } catch (error) {
+      console.warn("[ManualAuth] Supabase administrator sync unavailable; using signed admin fallback", error);
+    }
+    return {
+      id: `admin:${email}`,
+      fullName: "OMNI LIFE Administrator",
+      birthDate: "",
+      email: OMNI_ADMIN_EMAIL,
+      phone: "",
+      secondaryContact: null,
+      telegramLinked: false,
+      isCompedFree: true,
+      manualSessionToken: createManualSessionToken(email),
+      manualAdminToken: createManualAdminSessionToken(email),
+    } satisfies PublicSupabaseProfile;
+  }
   if (email === OMNI_ADMIN_EMAIL) await ensureOmniAdminAccount();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password: pin });
   if (error || !data.user) throw new Error("Invalid email or password.");
@@ -425,7 +459,7 @@ export async function listManualProfilesForAdministrator(limit = 250): Promise<A
   if (error) throw new Error("Unable to list account profiles for administration.");
   return (data ?? []).flatMap((row) => {
     const email = typeof row.email === "string" ? normalizeEmail(row.email) : "";
-    if (!email) return [];
+    if (!email || email === OMNI_ADMIN_EMAIL) return [];
     return [{ fullName: typeof row.name === "string" && row.name.trim() ? row.name.trim() : email, email, isCompedFree: Boolean(row.is_comped_free) }];
   });
 }
